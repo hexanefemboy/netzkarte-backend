@@ -1,5 +1,5 @@
 // In src/main.rs
-use actix_web::{get, web, App, HttpServer, Responder, Result, error, HttpResponse};
+use actix_web::{App, HttpResponse, HttpServer, Responder, Result, error, get, web};
 use rusqlite::Connection;
 use serde::Serialize;
 use std::env;
@@ -38,25 +38,26 @@ struct TowerWithUnits {
 // --- Health Check Endpoint ---
 #[get("/health")]
 async fn health_check(db_path: web::Data<String>) -> impl Responder {
-    // Use web::block for synchronous database operations
-    let result = web::block(move || {
-        // Try to open a connection and run a simple query
-        let conn = Connection::open(db_path.as_str())?;
-        conn.execute("SELECT 1", [])?;
-        Ok::<(), rusqlite::Error>(())
-    }).await;
+    let db_ok = web::block(move || {
+        let Ok(conn) = Connection::open(db_path.as_str()) else {
+            return false;
+        };
+        conn.query_row("SELECT 1", [], |_| Ok(())).is_ok()
+    })
+    .await;
 
-    match result {
-        // web::block can have its own errors, or the database operation can fail
-        Ok(Ok(_)) => HttpResponse::Ok().body("OK"),
+    match db_ok {
+        Ok(true) => HttpResponse::Ok().body("OK"),
         _ => HttpResponse::InternalServerError().body("Database connection failed"),
     }
 }
 
-
 // The handler function is now more complex
 #[get("/towers/{id}")]
-async fn get_tower_details(id: web::Path<u32>, db_path: web::Data<String>) -> Result<impl Responder> {
+async fn get_tower_details(
+    id: web::Path<u32>,
+    db_path: web::Data<String>,
+) -> Result<impl Responder> {
     let tower_fid = id.into_inner();
     let path = db_path.get_ref().clone();
 
