@@ -1,0 +1,14 @@
+services:
+  api:
+    build: .
+    container_name: netzkarte-rust-api
+    restart: unless-stopped
+    ports:
+      - "8007:8080"
+    volumes:
+      # The host path (left) is now determined by the environment variable.
+      # The container path (right) must match the value of DATABASE_URL.
+      - ./static/cell_towers.db:/app/cell_towers.db
+    # --- Add this environment section ---
+    environment:
+      - DATABASE_URL=/app/cell_towers.db
