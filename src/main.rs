@@ -5,44 +5,99 @@ use serde::Serialize;
 
 // The Item struct remains the same
 #[derive(Serialize)]
-struct Item {
-    id: i32,
-    name: String,
+struct SendingUnitItem {
+    id: u32,
+    tower_fid: u32,
+    cell_type: String,
+    mount_height: f64,
+    mount_direction: f64,
+    safety_distance: f64,
+    vertical_safety_distance: f64,
 }
 
+#[derive(Serialize)]
+struct TowerItem {
+    fid: u32,
+    latitude: f64,
+    longitude: f64,
+    creation_date: String,
+    provider_telekom: bool,
+    provider_vodafone: bool,
+    provider_telefonica: bool,
+    provider_1und1: bool,
+}
+
+#[derive(Serialize)]
+struct TowerWithUnits {
+    #[serde(flatten)]
+    tower: TowerItem,
+    units: Vec<SendingUnitItem>,
+}
+
+
 // The handler function is now more complex
-#[get("/items/{id}")]
-async fn get_item(id: web::Path<u32>) -> Result<impl Responder> {
-    let item_id = id.into_inner();
+#[get("/towers/{id}")]
+async fn get_tower_details(id: web::Path<u32>) -> Result<impl Responder> {
+    let tower_fid = id.into_inner();
 
     // web::block runs blocking code in a thread pool
-    let item = web::block(move || {
+    let tower_with_units = web::block(move || {
         // Open a new connection in the new thread.
         let conn = Connection::open("cell_towers.db")?;
 
-        // Query the database for an item with the given ID.
-        conn.query_row(
-            "SELECT fid, creation_date FROM towers WHERE fid = ?1",
-            [item_id],
+        let tower = conn.query_row(
+            "SELECT * FROM towers WHERE fid = ?1",
+            [tower_fid],
             |row| {
-                Ok(Item {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
+                Ok(TowerItem {
+                    fid: row.get(0)?,
+                    latitude: row.get(1)?,
+                    longitude: row.get(2)?,
+                    creation_date: row.get(3)?,
+                    provider_telekom: row.get(4)?,
+                    provider_vodafone: row.get(5)?,
+                    provider_telefonica: row.get(6)?,
+                    provider_1und1: row.get(7)?,
                 })
-            },
-        )
+            }
+        )?;
+
+
+        let mut stmt = conn.prepare("SELECT id, tower_fid, cell_type, mount_height, mount_direction, safety_distance, vertical_safety_distance FROM sending_units WHERE tower_fid = ?1")?;
+
+        // 2. Query the database and map the rows to our Item struct
+        let unit_iter = stmt.query_map([tower_fid], |row| {
+            Ok(SendingUnitItem {
+                id: row.get(0)?,
+                tower_fid: row.get(1)?,
+                cell_type: row.get(2)?,
+                mount_height: row.get(3)?,
+                mount_direction: row.get(4)?,
+                safety_distance: row.get(5)?,
+                vertical_safety_distance: row.get(6)?,
+            })
+        })?;
+
+        // // 3. Collect the results into a Vec<Item>
+        // let mut result_vec = Vec::new();
+        // for item in unit_iter {
+        //     result_vec.push(item?);
+        // }
+        let units = unit_iter.collect::<Result<Vec<_>, _>>()?;
+
+
+        Ok(TowerWithUnits { tower, units })
+
     })
-    .await // Wait for the blocking operation to complete
-    .map_err(|e| error::ErrorInternalServerError(e.to_string()))? // Handle thread pool errors
-    .map_err(|e| match e {
-        // Map rusqlite's "row not found" error to a 404 Not Found response
-        rusqlite::Error::QueryReturnedNoRows => error::ErrorNotFound(e.to_string()),
-        // Map other database errors to a 500 Internal Server Error
+    .await
+    .map_err(|e| error::ErrorInternalServerError(e.to_string()))? // Thread pool error
+    .map_err(|e: rusqlite::Error| match e { // Database error
+        rusqlite::Error::QueryReturnedNoRows => error::ErrorNotFound(format!("Tower with id {} not found", tower_fid)),
         _ => error::ErrorInternalServerError(e.to_string()),
     })?;
 
     // If everything is Ok, return the item as JSON
-    Ok(web::Json(item))
+    Ok(web::Json(tower_with_units))
 }
 
 #[actix_web::main]
@@ -50,7 +105,7 @@ async fn main() -> std::io::Result<()> {
     println!("🚀 Server starting at http://127.0.0.1:8080");
 
     HttpServer::new(|| {
-        App::new().service(get_item)
+        App::new().service(get_tower_details)
     })
     .bind(("127.0.0.1", 8080))?
     .run()
