@@ -1,7 +1,8 @@
 // In src/main.rs
-use actix_web::{get, web, App, HttpServer, Responder, Result, error};
+use actix_web::{get, web, App, HttpServer, Responder, Result, error, HttpResponse};
 use rusqlite::Connection;
 use serde::Serialize;
+use std::env;
 
 // The Item struct remains the same
 #[derive(Serialize)]
@@ -34,16 +35,35 @@ struct TowerWithUnits {
     units: Vec<SendingUnitItem>,
 }
 
+// --- Health Check Endpoint ---
+#[get("/health")]
+async fn health_check(db_path: web::Data<String>) -> impl Responder {
+    // Use web::block for synchronous database operations
+    let result = web::block(move || {
+        // Try to open a connection and run a simple query
+        let conn = Connection::open(db_path.as_str())?;
+        conn.execute("SELECT 1", [])?;
+        Ok::<(), rusqlite::Error>(())
+    }).await;
+
+    match result {
+        // web::block can have its own errors, or the database operation can fail
+        Ok(Ok(_)) => HttpResponse::Ok().body("OK"),
+        _ => HttpResponse::InternalServerError().body("Database connection failed"),
+    }
+}
+
 
 // The handler function is now more complex
 #[get("/towers/{id}")]
-async fn get_tower_details(id: web::Path<u32>) -> Result<impl Responder> {
+async fn get_tower_details(id: web::Path<u32>, db_path: web::Data<String>) -> Result<impl Responder> {
     let tower_fid = id.into_inner();
+    let path = db_path.get_ref().clone();
 
     // web::block runs blocking code in a thread pool
     let tower_with_units = web::block(move || {
         // Open a new connection in the new thread.
-        let conn = Connection::open("cell_towers.db")?;
+        let conn = Connection::open(path)?;
 
         let tower = conn.query_row(
             "SELECT * FROM towers WHERE fid = ?1",
@@ -61,7 +81,6 @@ async fn get_tower_details(id: web::Path<u32>) -> Result<impl Responder> {
                 })
             }
         )?;
-
 
         let mut stmt = conn.prepare("SELECT id, tower_fid, cell_type, mount_height, mount_direction, safety_distance, vertical_safety_distance FROM sending_units WHERE tower_fid = ?1")?;
 
@@ -96,16 +115,21 @@ async fn get_tower_details(id: web::Path<u32>) -> Result<impl Responder> {
         _ => error::ErrorInternalServerError(e.to_string()),
     })?;
 
-    // If everything is Ok, return the item as JSON
     Ok(web::Json(tower_with_units))
 }
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    println!("🚀 Server starting at http://127.0.0.1:8080");
+    let db_path = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
 
-    HttpServer::new(|| {
-        App::new().service(get_tower_details)
+    println!("🚀 Server starting at http://0.0.0.0:8080");
+    println!("📖 Using database at: {}", db_path);
+
+    HttpServer::new(move || {
+        App::new()
+            .app_data(web::Data::new(db_path.clone()))
+            .service(health_check)
+            .service(get_tower_details)
     })
     .bind(("0.0.0.0", 8080))?
     .run()
