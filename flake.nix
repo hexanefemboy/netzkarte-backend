@@ -40,7 +40,7 @@
             libc
           ];
           RUST_SRC_PATH = pkgs.rustPlatform.rustLibSrc;
-		  DATABASE_URL = "cell_towers.db";
+          DATABASE_URL = "cell_towers.db";
         };
       });
     };
