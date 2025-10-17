@@ -1,0 +1,6 @@
+/target
+.git
+cell_towers.db
+
+/.vs
+.gitignore

@@ -27,4 +27,4 @@ target
 /target
 
 *.db
-*.lock
+
