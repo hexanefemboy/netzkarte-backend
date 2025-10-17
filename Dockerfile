@@ -1,29 +1,32 @@
-# --- Stage 1: Build the application ---
+# --- Stage 1: Build a statically-linked application ---
 FROM rust:1.85 as builder
+
+# Install the MUSL target for static compilation
+RUN rustup target add x86_64-unknown-linux-musl
 
 WORKDIR /usr/src/app
 
-# Copy manifests
-COPY Cargo.toml Cargo.lock ./
+# Create a dummy project to cache dependencies for the MUSL target
+RUN cargo new --bin dummy
+WORKDIR /usr/src/app/dummy
+COPY ../Cargo.toml ../Cargo.lock ./
+RUN cargo build --target x86_64-unknown-linux-musl --release
 
-# Build ONLY dependencies using a dummy project.
-# The dummy main.rs is now empty, as it's just for compilation.
-RUN mkdir src
-RUN echo "fn main() {}" > src/main.rs
-RUN cargo build --release
-
-# Now, copy your actual source code. This invalidates the cache for the next step.
+# Copy your actual source code
 COPY ./src ./src
 
-# Build the actual application. This will reuse the cached dependencies and be much faster.
-RUN cargo build --release
+# Build the real application as a statically linked binary
+# This will be fast because dependencies are cached
+RUN cargo build --target x86_64-unknown-linux-musl --release
 
 # --- Stage 2: Create the final, minimal image ---
-FROM debian:bookworm-slim
+# We can use the 'scratch' image because the binary is fully self-contained
+FROM scratch
 
-# Copy the final, correct binary from the builder stage.
-# Make sure 'netzkarte-backend' matches your package name in Cargo.toml.
-COPY --from=builder /usr/src/app/target/release/netzkarte-backend /usr/local/bin/netzkarte-backend
+# Copy the compiled binary from the builder stage
+# Note the different path for the MUSL target
+COPY --from=builder /usr/src/app/dummy/target/x86_64-unknown-linux-musl/release/netzkarte-backend /netzkarte-backend
 
 # Set the command to run your application
-CMD ["/usr/local/bin/netzkarte-backend"]
+CMD ["/netzkarte-backend"]
+
