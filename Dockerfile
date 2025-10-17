@@ -22,7 +22,7 @@ RUN cargo build --release
 
 # --- Stage 2: Create the final, minimal image ---
 # Use a slim Debian image for a small footprint
-FROM debian:bullseye-slim
+FROM debian:bookworm-slim
 
 # Copy the compiled binary from the builder stage
 COPY --from=builder /usr/src/app/target/release/netzkarte-backend /usr/local/bin/netzkarte-backend
