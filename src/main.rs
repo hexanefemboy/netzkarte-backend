@@ -1,10 +1,9 @@
-// In src/main.rs
-use actix_web::{get, web, App, HttpServer, Responder, Result, error, HttpResponse};
+use actix_cors::Cors;
+use actix_web::{get, web, App, HttpServer, Responder, Result, error, HttpResponse, http::header};
 use rusqlite::Connection;
 use serde::Serialize;
 use std::env;
 
-// The Item struct remains the same
 #[derive(Serialize)]
 struct SendingUnitItem {
     id: u32,
@@ -126,7 +125,16 @@ async fn main() -> std::io::Result<()> {
     println!("📖 Using database at: {}", db_path);
 
     HttpServer::new(move || {
+
+        let cors = Cors::default()
+            .allow_any_origin() // Allows requests from any domain
+            .allowed_methods(vec!["GET", "POST"]) // Specify allowed methods
+            .allowed_headers(vec![header::AUTHORIZATION, header::ACCEPT])
+            .allowed_header(header::CONTENT_TYPE)
+            .max_age(3600);
+
         App::new()
+            .wrap(cors)
             .app_data(web::Data::new(db_path.clone()))
             .service(health_check)
             .service(get_tower_details)
